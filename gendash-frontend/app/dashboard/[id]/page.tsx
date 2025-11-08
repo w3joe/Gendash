@@ -2,69 +2,202 @@
 
 import { useEffect, useState } from "react";
 import { useRouter, useParams } from "next/navigation";
-import LineChart from "../../components/charts/LineChart";
-import BarChart from "../../components/charts/BarChart";
-import PieChart from "../../components/charts/PieChart";
-import AreaChart from "../../components/charts/AreaChart";
-import MetricCard from "../../components/MetricCard";
-import DataTable from "../../components/DataTable";
+import { fetchApiData, DashboardSpec, DashboardComponent } from "@/lib/api";
+import DynamicLineChart from "../../components/charts/DynamicLineChart";
+import DynamicBarChart from "../../components/charts/DynamicBarChart";
+import DynamicHorizontalBarChart from "../../components/charts/DynamicHorizontalBarChart";
+import DynamicPieChart from "../../components/charts/DynamicPieChart";
+import DynamicDataTable from "../../components/charts/DynamicDataTable";
+import DynamicMetricCard from "../../components/charts/DynamicMetricCard";
+import DynamicGlobeMap from "../../components/charts/DynamicGlobeMap";
 
 export default function DashboardPage() {
   const router = useRouter();
   const params = useParams();
   const [apiUrl, setApiUrl] = useState("");
   const [isDarkMode, setIsDarkMode] = useState(true);
+  const [dashboardSpec, setDashboardSpec] = useState<DashboardSpec | null>(null);
+  const [dashboardData, setDashboardData] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [refreshing, setRefreshing] = useState(false);
 
   useEffect(() => {
-    // Retrieve the prompt from localStorage
-    const storedPrompt = localStorage.getItem('dashboardPrompt');
-    if (storedPrompt) {
-      setApiUrl(storedPrompt);
+    const loadDashboard = async () => {
+      try {
+        // Retrieve dashboard spec from localStorage
+        const storedSpec = localStorage.getItem('dashboardSpec');
+        const storedApiUrl = localStorage.getItem('dashboardApiUrl');
+
+        if (!storedSpec || !storedApiUrl) {
+          setError('Dashboard not found. Please generate a new dashboard.');
+          setTimeout(() => router.push('/'), 2000);
+          return;
+        }
+
+        setApiUrl(storedApiUrl);
+        setDashboardSpec(JSON.parse(storedSpec));
+
+        // Fetch data from user's API
+        const data = await fetchApiData(storedApiUrl);
+        setDashboardData(data);
+        setLoading(false);
+
+      } catch (err) {
+        console.error('Error loading dashboard:', err);
+        setError(err instanceof Error ? err.message : 'Failed to load dashboard');
+        setLoading(false);
+      }
+    };
+
+    loadDashboard();
+  }, [router]);
+
+  const handleRefresh = async () => {
+    setRefreshing(true);
+    try {
+      const data = await fetchApiData(apiUrl);
+      setDashboardData(data);
+    } catch (err) {
+      console.error('Error refreshing data:', err);
+      setError(err instanceof Error ? err.message : 'Failed to refresh data');
+    } finally {
+      setRefreshing(false);
     }
-  }, []);
+  };
 
-  // Dummy data for charts
-  const lineData = [
-    { date: "Jan", value: 30, value2: 20 },
-    { date: "Feb", value: 45, value2: 35 },
-    { date: "Mar", value: 28, value2: 40 },
-    { date: "Apr", value: 60, value2: 50 },
-    { date: "May", value: 55, value2: 45 },
-    { date: "Jun", value: 75, value2: 65 },
-    { date: "Jul", value: 70, value2: 60 },
-  ];
+  const renderComponent = (component: DashboardComponent, index: number) => {
+    const commonProps = {
+      isDarkMode,
+      data: dashboardData,
+      title: component.title,
+    };
 
-  const barData = [
-    { category: "Product A", value: 120 },
-    { category: "Product B", value: 95 },
-    { category: "Product C", value: 145 },
-    { category: "Product D", value: 80 },
-    { category: "Product E", value: 110 },
-  ];
+    switch (component.type) {
+      case 'line':
+        return (
+          <DynamicLineChart
+            key={component.id}
+            {...commonProps}
+            xKey={component.dataMapping.xAxis || component.dataMapping.xKey}
+            yKeys={Array.isArray(component.dataMapping.yAxis)
+              ? component.dataMapping.yAxis
+              : component.dataMapping.yKeys || [component.dataMapping.yAxis || component.dataMapping.yKey]
+            }
+          />
+        );
 
-  const pieData = [
-    { label: "Desktop", value: 45 },
-    { label: "Mobile", value: 35 },
-    { label: "Tablet", value: 15 },
-    { label: "Other", value: 5 },
-  ];
+      case 'bar':
+        return (
+          <DynamicBarChart
+            key={component.id}
+            {...commonProps}
+            xKey={component.dataMapping.xAxis || component.dataMapping.xKey}
+            yKey={component.dataMapping.yAxis || component.dataMapping.yKey}
+          />
+        );
 
-  const areaData = [
-    { date: "Week 1", revenue: 12000, expenses: 8000 },
-    { date: "Week 2", revenue: 15000, expenses: 9500 },
-    { date: "Week 3", revenue: 13500, expenses: 8800 },
-    { date: "Week 4", revenue: 18000, expenses: 11000 },
-    { date: "Week 5", revenue: 22000, expenses: 12500 },
-    { date: "Week 6", revenue: 20000, expenses: 11800 },
-  ];
+      case 'horizontalBar':
+        return (
+          <DynamicHorizontalBarChart
+            key={component.id}
+            {...commonProps}
+            yKey={component.dataMapping.yAxis || component.dataMapping.yKey}
+            xKey={component.dataMapping.xAxis || component.dataMapping.xKey}
+          />
+        );
 
-  const tableData = [
-    { id: 1, name: "Project Alpha", status: "Active", progress: 75, revenue: "$45,000" },
-    { id: 2, name: "Project Beta", status: "Completed", progress: 100, revenue: "$62,000" },
-    { id: 3, name: "Project Gamma", status: "Active", progress: 45, revenue: "$28,000" },
-    { id: 4, name: "Project Delta", status: "Pending", progress: 15, revenue: "$12,000" },
-    { id: 5, name: "Project Epsilon", status: "Active", progress: 90, revenue: "$54,000" },
-  ];
+      case 'pie':
+        return (
+          <DynamicPieChart
+            key={component.id}
+            {...commonProps}
+            labelKey={component.dataMapping.label || component.dataMapping.labelKey}
+            valueKey={component.dataMapping.value || component.dataMapping.valueKey}
+          />
+        );
+
+      case 'table':
+        return (
+          <DynamicDataTable
+            key={component.id}
+            {...commonProps}
+            pageSize={10}
+          />
+        );
+
+      case 'metric':
+        // Calculate metric value from data
+        const valueField = component.dataMapping.value;
+        let metricValue: any = 0;
+
+        if (valueField && dashboardData.length > 0) {
+          // Try to sum numeric values
+          const sum = dashboardData.reduce((acc, item) => {
+            const val = item[valueField];
+            return acc + (typeof val === 'number' ? val : 0);
+          }, 0);
+          metricValue = sum || dashboardData[0][valueField] || 0;
+        }
+
+        return (
+          <DynamicMetricCard
+            key={component.id}
+            title={component.title}
+            value={metricValue}
+            isDarkMode={isDarkMode}
+            icon="📊"
+            color="from-blue-500 to-purple-500"
+          />
+        );
+
+      case 'globe':
+        return (
+          <DynamicGlobeMap
+            key={component.id}
+            {...commonProps}
+            autoRotate={true}
+            rotationSpeed={0.5}
+          />
+        );
+
+      default:
+        return (
+          <div key={component.id} className="p-4 text-center text-zinc-400">
+            Unknown component type: {component.type}
+          </div>
+        );
+    }
+  };
+
+  if (loading) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-zinc-900">
+        <div className="text-center">
+          <div className="w-16 h-16 border-4 border-purple-500 border-t-transparent rounded-full animate-spin mx-auto mb-4" />
+          <p className="text-zinc-300">Loading dashboard...</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-zinc-900">
+        <div className="text-center max-w-md">
+          <div className="text-red-400 text-6xl mb-4">⚠️</div>
+          <h2 className="text-2xl font-bold text-zinc-100 mb-2">Error</h2>
+          <p className="text-zinc-400 mb-6">{error}</p>
+          <button
+            onClick={() => router.push('/')}
+            className="px-6 py-3 bg-gradient-to-r from-blue-500 to-purple-500 text-white rounded-xl font-semibold hover:from-blue-600 hover:to-purple-600 transition-all"
+          >
+            Go Home
+          </button>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div
@@ -76,15 +209,34 @@ export default function DashboardPage() {
       <div className="max-w-[1800px] mx-auto mb-10">
         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-6 mb-8">
           <div>
-            <h1 className={`text-4xl sm:text-5xl font-bold mb-3 bg-clip-text text-transparent bg-gradient-to-r from-blue-400 via-purple-400 to-pink-400`}>
+            <h1 className="text-4xl sm:text-5xl font-bold mb-3 bg-clip-text text-transparent bg-gradient-to-r from-blue-400 via-purple-400 to-pink-400">
               Dashboard Analytics
             </h1>
             <p className={`text-base ${isDarkMode ? 'text-zinc-400' : 'text-gray-600'} truncate max-w-xl`}>
-              Data Source: {apiUrl || "Loading..."}
+              Data Source: {apiUrl}
+            </p>
+            <p className={`text-sm ${isDarkMode ? 'text-zinc-500' : 'text-gray-500'} mt-1`}>
+              {dashboardData.length} records loaded
             </p>
           </div>
 
           <div className="flex items-center gap-4">
+            {/* Refresh Button */}
+            <button
+              onClick={handleRefresh}
+              disabled={refreshing}
+              className={`p-4 rounded-xl font-semibold transition-all duration-300 shadow-lg hover:shadow-xl transform hover:scale-105 active:scale-95 ${
+                isDarkMode
+                  ? 'bg-zinc-800 text-blue-400 hover:bg-zinc-700'
+                  : 'bg-white text-blue-600 hover:bg-gray-100 border-2 border-gray-200'
+              } ${refreshing ? 'opacity-50 cursor-not-allowed' : ''}`}
+              title="Refresh Data"
+            >
+              <svg className={`w-6 h-6 ${refreshing ? 'animate-spin' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+              </svg>
+            </button>
+
             {/* Light/Dark Mode Toggle */}
             <button
               onClick={() => setIsDarkMode(!isDarkMode)}
@@ -106,6 +258,7 @@ export default function DashboardPage() {
               )}
             </button>
 
+            {/* New Dashboard Button */}
             <button
               onClick={() => router.push('/')}
               className="px-6 py-3 rounded-xl font-semibold text-white text-base
@@ -119,106 +272,64 @@ export default function DashboardPage() {
           </div>
         </div>
 
-        {/* Metric Cards */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
-          <MetricCard
-            title="Total Revenue"
-            value="$145,320"
-            change={12.5}
-            icon="💰"
-            color="from-blue-500 to-cyan-500"
-            isDarkMode={isDarkMode}
-          />
-          <MetricCard
-            title="Active Users"
-            value="8,549"
-            change={8.2}
-            icon="👥"
-            color="from-purple-500 to-pink-500"
-            isDarkMode={isDarkMode}
-          />
-          <MetricCard
-            title="Conversion Rate"
-            value="3.24%"
-            change={-2.4}
-            icon="📈"
-            color="from-green-500 to-emerald-500"
-            isDarkMode={isDarkMode}
-          />
-          <MetricCard
-            title="Avg. Session"
-            value="4m 32s"
-            change={5.7}
-            icon="⏱️"
-            color="from-orange-500 to-red-500"
-            isDarkMode={isDarkMode}
-          />
-        </div>
-      </div>
+        {/* Render Components */}
+        {dashboardSpec && dashboardSpec.components && (
+          <div className="space-y-6">
+            {/* Metric Cards - 4 columns */}
+            {dashboardSpec.components.filter(c => c.type === 'metric').length > 0 && (
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
+                {dashboardSpec.components
+                  .filter(c => c.type === 'metric')
+                  .map((component, index) => renderComponent(component, index))}
+              </div>
+            )}
 
-      {/* Charts Grid */}
-      <div className="max-w-[1800px] mx-auto space-y-8">
-        {/* Row 1: Line and Bar Charts */}
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
-          <div className={`rounded-2xl p-8 border shadow-xl transition-colors duration-300 ${
-            isDarkMode
-              ? 'bg-zinc-800/60 border-zinc-700/50'
-              : 'bg-white border-gray-200'
-          }`}>
-            <h3 className={`text-xl font-semibold mb-6 ${isDarkMode ? 'text-zinc-100' : 'text-gray-900'}`}>
-              Performance Trends
-            </h3>
-            <LineChart data={lineData} />
+            {/* Charts in 2x2 grid (excluding metrics, table, and globe) */}
+            {dashboardSpec.components.filter(c =>
+              c.type !== 'metric' && c.type !== 'table' && c.type !== 'globe'
+            ).length > 0 && (
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                {dashboardSpec.components
+                  .filter(c => c.type !== 'metric' && c.type !== 'table' && c.type !== 'globe')
+                  .map((component, index) => (
+                    <div
+                      key={component.id}
+                      className={`rounded-2xl p-6 sm:p-8 border shadow-xl transition-colors duration-300 ${
+                        isDarkMode
+                          ? 'bg-zinc-800/60 border-zinc-700/50'
+                          : 'bg-white border-gray-200'
+                      }`}
+                    >
+                      {renderComponent(component, index)}
+                    </div>
+                  ))}
+              </div>
+            )}
+
+            {/* Full-width components (Table and Globe) */}
+            {dashboardSpec.components
+              .filter(c => c.type === 'table' || c.type === 'globe')
+              .map((component, index) => (
+                <div
+                  key={component.id}
+                  className={`rounded-2xl p-6 sm:p-8 border shadow-xl transition-colors duration-300 ${
+                    isDarkMode
+                      ? 'bg-zinc-800/60 border-zinc-700/50'
+                      : 'bg-white border-gray-200'
+                  }`}
+                >
+                  {renderComponent(component, index)}
+                </div>
+              ))}
           </div>
+        )}
 
-          <div className={`rounded-2xl p-8 border shadow-xl transition-colors duration-300 ${
-            isDarkMode
-              ? 'bg-zinc-800/60 border-zinc-700/50'
-              : 'bg-white border-gray-200'
-          }`}>
-            <h3 className={`text-xl font-semibold mb-6 ${isDarkMode ? 'text-zinc-100' : 'text-gray-900'}`}>
-              Product Sales
-            </h3>
-            <BarChart data={barData} />
+        {/* No components message */}
+        {dashboardSpec && (!dashboardSpec.components || dashboardSpec.components.length === 0) && (
+          <div className="text-center py-20">
+            <p className="text-zinc-400 text-lg">No components to display</p>
           </div>
-        </div>
-
-        {/* Row 2: Pie and Area Charts */}
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
-          <div className={`rounded-2xl p-8 border shadow-xl transition-colors duration-300 ${
-            isDarkMode
-              ? 'bg-zinc-800/60 border-zinc-700/50'
-              : 'bg-white border-gray-200'
-          }`}>
-            <h3 className={`text-xl font-semibold mb-6 ${isDarkMode ? 'text-zinc-100' : 'text-gray-900'}`}>
-              Device Distribution
-            </h3>
-            <PieChart data={pieData} />
-          </div>
-
-          <div className={`rounded-2xl p-8 border shadow-xl transition-colors duration-300 ${
-            isDarkMode
-              ? 'bg-zinc-800/60 border-zinc-700/50'
-              : 'bg-white border-gray-200'
-          }`}>
-            <h3 className={`text-xl font-semibold mb-6 ${isDarkMode ? 'text-zinc-100' : 'text-gray-900'}`}>
-              Revenue vs Expenses
-            </h3>
-            <AreaChart data={areaData} />
-          </div>
-        </div>
-
-        {/* Row 3: Data Table */}
-        <div className={`rounded-2xl p-8 border shadow-xl transition-colors duration-300 ${
-          isDarkMode
-            ? 'bg-zinc-800/60 border-zinc-700/50'
-            : 'bg-white border-gray-200'
-        }`}>
-          <h3 className={`text-xl font-semibold mb-6 ${isDarkMode ? 'text-zinc-100' : 'text-gray-900'}`}>
-            Project Overview
-          </h3>
-          <DataTable data={tableData} isDarkMode={isDarkMode} />
-        </div>
+        )}
       </div>
     </div>
   );

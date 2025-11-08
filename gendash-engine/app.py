@@ -4,6 +4,7 @@ Main HTTP interface for frontend requests.
 """
 
 import os
+import json
 import requests
 from flask import Flask, request, jsonify
 from flask_cors import CORS
@@ -78,11 +79,26 @@ def generate_dashboard():
             }), 400
 
         # Fetch data from API
+        print(f"\n{'='*80}")
         print(f"Fetching data from: {api_url}")
+        print(f"{'='*80}")
         try:
             response = requests.get(api_url, timeout=30)
             response.raise_for_status()
             api_data = response.json()
+            
+            # Print raw API response
+            print(f"\n[API Response] Raw data structure:")
+            print(f"Type: {type(api_data)}")
+            if isinstance(api_data, dict):
+                print(f"Keys: {list(api_data.keys())}")
+                print(f"Sample keys content (first 200 chars): {str(api_data)[:200]}")
+            elif isinstance(api_data, list):
+                print(f"Array length: {len(api_data)}")
+                if len(api_data) > 0:
+                    print(f"First item keys: {list(api_data[0].keys()) if isinstance(api_data[0], dict) else 'Not a dict'}")
+                    print(f"First item sample: {str(api_data[0])[:300]}")
+            
         except requests.RequestException as e:
             return jsonify({
                 "success": False,
@@ -95,21 +111,29 @@ def generate_dashboard():
             }), 400
 
         # Handle different API response formats
+        original_data = api_data
         if isinstance(api_data, dict):
             # Check for common pagination/wrapper patterns
             if 'data' in api_data:
                 api_data = api_data['data']
+                print(f"[API Response] Extracted 'data' field")
             elif 'results' in api_data:
                 api_data = api_data['results']
+                print(f"[API Response] Extracted 'results' field")
             elif 'items' in api_data:
                 api_data = api_data['items']
+                print(f"[API Response] Extracted 'items' field")
             elif 'features' in api_data:  # GeoJSON format
                 api_data = api_data['features']
+                print(f"[API Response] Extracted 'features' field (GeoJSON)")
+            else:
+                print(f"[API Response] No standard wrapper found, using root object")
 
         # Ensure data is a list
         if not isinstance(api_data, list):
             # If it's a single object, wrap it in a list
             api_data = [api_data] if isinstance(api_data, dict) else []
+            print(f"[API Response] Wrapped single object into array")
 
         if not api_data:
             return jsonify({
@@ -117,7 +141,12 @@ def generate_dashboard():
                 "error": "API returned empty or invalid data"
             }), 400
 
-        print(f"Received {len(api_data)} records from API")
+        print(f"\n[API Response] Final processed data:")
+        print(f"Total records: {len(api_data)}")
+        if len(api_data) > 0 and isinstance(api_data[0], dict):
+            print(f"Fields in first record: {list(api_data[0].keys())}")
+            print(f"First record sample: {json.dumps(api_data[0], indent=2, default=str)[:500]}")
+        print(f"{'='*80}\n")
 
         # Generate dashboard
         gen = get_generator()
@@ -208,9 +237,33 @@ def analyze_data():
         analyzer = DataAnalyzer(api_data)
         analysis = analyzer.analyze()
 
+        # Safely serialize the analysis. model_dump() may fail in rare cases
+        # if the model contains unexpected/unhashable internal types. Try
+        # using model_dump(), and fallback to a manual construction using the
+        # analyzer's raw data if that fails.
+        try:
+            analysis_payload = analysis.model_dump()
+        except Exception:
+            print("Warning: model_dump() failed for DataAnalysisResult, falling back to manual serialization")
+            print(traceback.format_exc())
+            # Build a conservative, JSON-serializable payload
+            analysis_payload = {
+                "dataTypes": getattr(analysis, 'dataTypes', {}),
+                "isTimeSeries": getattr(analysis, 'isTimeSeries', False),
+                "timeFields": getattr(analysis, 'timeFields', []),
+                "numericFields": getattr(analysis, 'numericFields', []),
+                "categoricalFields": getattr(analysis, 'categoricalFields', []),
+                "keyMetrics": getattr(analysis, 'keyMetrics', []),
+                "cardinality": getattr(analysis, 'cardinality', {}),
+                "nullPercentages": getattr(analysis, 'nullPercentages', {}),
+                "recommendedCharts": getattr(analysis, 'recommendedCharts', []),
+                # Return original raw sample rows (not sanitized) to preserve structure
+                "sampleData": getattr(analyzer, 'raw_data', [])[:10]
+            }
+
         return jsonify({
             "success": True,
-            "analysis": analysis.model_dump()
+            "analysis": analysis_payload
         })
 
     except Exception as e:

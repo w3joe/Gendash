@@ -105,6 +105,15 @@ export default function PromptBox({ className = "" }: PromptBoxProps) {
       return;
     }
 
+    // Prevent double submission
+    const isGenerating = sessionStorage.getItem('isGeneratingDashboard');
+    if (isGenerating === 'true') {
+      return; // Already generating, ignore duplicate submit
+    }
+
+    // Mark as generating
+    sessionStorage.setItem('isGeneratingDashboard', 'true');
+
     // Store the prompt in localStorage to pass to loading page
     localStorage.setItem('dashboardPrompt', prompt);
 

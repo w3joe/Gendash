@@ -5,6 +5,7 @@ Implements FR-8, FR-9, and FR-10 from requirements.
 
 import pandas as pd
 import numpy as np
+import json
 from typing import Dict, List, Any, Optional
 from datetime import datetime
 import re
@@ -24,8 +25,33 @@ class DataAnalyzer:
         Args:
             data: List of dictionaries representing API response data
         """
-        self.data = data
-        self.df = pd.DataFrame(data) if data else pd.DataFrame()
+        # Keep raw data for sample output, but sanitize values for DataFrame
+        # operations to avoid unhashable types (e.g., dicts/lists) causing
+        # pandas functions like `nunique()` to raise "unhashable type: 'dict'".
+        self.raw_data = data or []
+
+        sanitized = []
+        for row in self.raw_data:
+            new_row = {}
+            # If row isn't a mapping, preserve it as-is
+            if not isinstance(row, dict):
+                sanitized.append(row)
+                continue
+            for k, v in row.items():
+                # Convert nested dicts/lists to stable JSON strings so they are
+                # hashable and can be used in pandas uniqueness checks.
+                if isinstance(v, (dict, list)):
+                    try:
+                        new_row[k] = json.dumps(v, sort_keys=True)
+                    except Exception:
+                        new_row[k] = str(v)
+                else:
+                    new_row[k] = v
+            sanitized.append(new_row)
+
+        # Use sanitized data for DataFrame operations
+        self.data = sanitized
+        self.df = pd.DataFrame(self.data) if self.data else pd.DataFrame()
 
     def analyze(self) -> DataAnalysisResult:
         """
@@ -45,11 +71,12 @@ class DataAnalyzer:
         time_fields = self._detect_time_fields()
         numeric_fields = self._detect_numeric_fields()
         categorical_fields = self._detect_categorical_fields()
+        geographic_fields = self._detect_geographic_fields()
         key_metrics = self._identify_key_metrics(numeric_fields)
         cardinality = self._calculate_cardinality()
         null_percentages = self._calculate_null_percentages()
         recommended_charts = self._recommend_chart_types(
-            time_fields, numeric_fields, categorical_fields, cardinality
+            time_fields, numeric_fields, categorical_fields, cardinality, geographic_fields
         )
 
         return DataAnalysisResult(
@@ -93,24 +120,42 @@ class DataAnalyzer:
         if len(sample) == 0:
             return False
 
-        # Common date patterns
-        date_patterns = [
-            r'\d{4}-\d{2}-\d{2}',  # YYYY-MM-DD
-            r'\d{2}/\d{2}/\d{4}',  # MM/DD/YYYY
-            r'\d{4}/\d{2}/\d{2}',  # YYYY/MM/DD
+        # Common date format mappings
+        date_formats = [
+            '%Y-%m-%d',           # YYYY-MM-DD
+            '%Y-%m-%dT%H:%M:%S',  # ISO format
+            '%Y-%m-%d %H:%M:%S',  # YYYY-MM-DD HH:MM:SS
+            '%m/%d/%Y',           # MM/DD/YYYY
+            '%Y/%m/%d',           # YYYY/MM/DD
+            '%d-%m-%Y',           # DD-MM-YYYY
         ]
 
         # Check field name hints
         name_hints = ['date', 'time', 'timestamp', 'created', 'updated', 'at', 'on']
         has_name_hint = any(hint in column.lower() for hint in name_hints)
 
-        # Try parsing sample values
+        # Try parsing sample values with explicit formats
         try:
-            pd.to_datetime(sample, errors='coerce')
-            parsed = pd.to_datetime(sample, errors='coerce')
-            valid_dates = parsed.notna().sum()
-            if valid_dates / len(sample) > 0.8:  # 80% parseable
-                return True
+            # Try common formats first
+            parsed = None
+            for fmt in date_formats:
+                try:
+                    parsed = pd.to_datetime(sample, format=fmt, errors='coerce')
+                    valid_dates = parsed.notna().sum()
+                    if valid_dates / len(sample) > 0.8:  # 80% parseable
+                        return True
+                except (ValueError, TypeError):
+                    continue
+
+            # If no format worked, try with mixed format (handles multiple formats)
+            if parsed is None or parsed.notna().sum() == 0:
+                try:
+                    parsed = pd.to_datetime(sample, format='mixed', errors='coerce')
+                    valid_dates = parsed.notna().sum()
+                    if valid_dates / len(sample) > 0.8:  # 80% parseable
+                        return True
+                except (ValueError, TypeError):
+                    pass
         except:
             pass
 
@@ -155,6 +200,42 @@ class DataAnalyzer:
                 if unique_count < total_count * 0.5 and unique_count < 50:
                     categorical_fields.append(col)
         return categorical_fields
+
+    def _detect_geographic_fields(self) -> Dict[str, str]:
+        """
+        Detect geographic coordinate fields (latitude/longitude).
+        Returns dict mapping field names to their role: 'lat', 'lon', or 'both'
+        """
+        geographic_fields = {}
+        lat_patterns = ['lat', 'latitude', 'y']
+        lon_patterns = ['lon', 'lng', 'long', 'longitude', 'x']
+        
+        for col in self.df.columns:
+            col_lower = col.lower()
+            
+            # Check for latitude patterns
+            if any(pattern in col_lower for pattern in lat_patterns):
+                if pd.api.types.is_numeric_dtype(self.df[col]):
+                    # Validate range: latitude should be between -90 and 90
+                    sample = self.df[col].dropna().head(100)
+                    if len(sample) > 0:
+                        min_val = sample.min()
+                        max_val = sample.max()
+                        if -90 <= min_val <= 90 and -90 <= max_val <= 90:
+                            geographic_fields[col] = 'lat'
+            
+            # Check for longitude patterns
+            if any(pattern in col_lower for pattern in lon_patterns):
+                if pd.api.types.is_numeric_dtype(self.df[col]):
+                    # Validate range: longitude should be between -180 and 180
+                    sample = self.df[col].dropna().head(100)
+                    if len(sample) > 0:
+                        min_val = sample.min()
+                        max_val = sample.max()
+                        if -180 <= min_val <= 180 and -180 <= max_val <= 180:
+                            geographic_fields[col] = 'lon'
+        
+        return geographic_fields
 
     def _is_id_field(self, column: str) -> bool:
         """Check if a field is likely an ID field."""
@@ -209,13 +290,24 @@ class DataAnalyzer:
         time_fields: List[str],
         numeric_fields: List[str],
         categorical_fields: List[str],
-        cardinality: Dict[str, int]
+        cardinality: Dict[str, int],
+        geographic_fields: Dict[str, str] = None
     ) -> List[str]:
         """
         Implements FR-9: ChartTypeRecommender tool.
         Suggest appropriate visualization types based on data characteristics.
         """
         recommendations = []
+        
+        if geographic_fields is None:
+            geographic_fields = {}
+
+        # Geographic data -> globe map (highest priority if detected)
+        if geographic_fields:
+            has_lat = any(role == 'lat' for role in geographic_fields.values())
+            has_lon = any(role == 'lon' for role in geographic_fields.values())
+            if has_lat and has_lon:
+                recommendations.append("globe")
 
         # Time series data -> line or area charts
         if time_fields and numeric_fields:
