@@ -36,11 +36,32 @@ export default function DashboardPage() {
         }
 
         setApiUrl(storedApiUrl);
-        setDashboardSpec(JSON.parse(storedSpec));
+        const parsedSpec = JSON.parse(storedSpec);
+        setDashboardSpec(parsedSpec);
 
         // Fetch data from user's API
         const data = await fetchApiData(storedApiUrl);
         setDashboardData(data);
+
+        // Log fetched data for debugging
+        console.log('[Dashboard] Fetched data:', {
+          recordCount: data.length,
+          firstRecord: data[0],
+          allFields: data.length > 0 ? Object.keys(data[0]) : []
+        });
+
+        // Log dashboard spec for debugging
+        console.log('[Dashboard] Loaded dashboard spec:', {
+          totalComponents: parsedSpec.components.length,
+          componentTypes: parsedSpec.components.map(c => c.type),
+          components: parsedSpec.components.map(c => ({
+            id: c.id,
+            type: c.type,
+            title: c.title,
+            dataMapping: c.dataMapping
+          }))
+        });
+
         setLoading(false);
 
       } catch (err) {
@@ -88,32 +109,53 @@ export default function DashboardPage() {
         );
 
       case 'bar':
+        const barXKey = component.dataMapping.xAxis || component.dataMapping.xKey;
+        const barYKey = component.dataMapping.yAxis || component.dataMapping.yKey;
+        console.log(`[Dashboard] Bar chart ${component.id} mapping:`, {
+          dataMapping: component.dataMapping,
+          resolvedXKey: barXKey,
+          resolvedYKey: barYKey
+        });
         return (
           <DynamicBarChart
             key={component.id}
             {...commonProps}
-            xKey={component.dataMapping.xAxis || component.dataMapping.xKey}
-            yKey={component.dataMapping.yAxis || component.dataMapping.yKey}
+            xKey={barXKey}
+            yKey={barYKey}
           />
         );
 
       case 'horizontalBar':
+        const hBarYKey = component.dataMapping.yAxis || component.dataMapping.yKey;
+        const hBarXKey = component.dataMapping.xAxis || component.dataMapping.xKey;
+        console.log(`[Dashboard] Horizontal bar chart ${component.id} mapping:`, {
+          dataMapping: component.dataMapping,
+          resolvedYKey: hBarYKey,
+          resolvedXKey: hBarXKey
+        });
         return (
           <DynamicHorizontalBarChart
             key={component.id}
             {...commonProps}
-            yKey={component.dataMapping.yAxis || component.dataMapping.yKey}
-            xKey={component.dataMapping.xAxis || component.dataMapping.xKey}
+            yKey={hBarYKey}
+            xKey={hBarXKey}
           />
         );
 
       case 'pie':
+        const pieLabelKey = component.dataMapping.label || component.dataMapping.labelKey;
+        const pieValueKey = component.dataMapping.value || component.dataMapping.valueKey;
+        console.log(`[Dashboard] Pie chart ${component.id} mapping:`, {
+          dataMapping: component.dataMapping,
+          resolvedLabelKey: pieLabelKey,
+          resolvedValueKey: pieValueKey
+        });
         return (
           <DynamicPieChart
             key={component.id}
             {...commonProps}
-            labelKey={component.dataMapping.label || component.dataMapping.labelKey}
-            valueKey={component.dataMapping.value || component.dataMapping.valueKey}
+            labelKey={pieLabelKey}
+            valueKey={pieValueKey}
           />
         );
 
@@ -128,16 +170,86 @@ export default function DashboardPage() {
 
       case 'metric':
         // Calculate metric value from data
-        const valueField = component.dataMapping.value;
+        const valueField = component.dataMapping.value || component.dataMapping.valueKey;
         let metricValue: any = 0;
+        let metricIcon = "📊";
+        let metricColor = "from-blue-500 to-purple-500";
 
-        if (valueField && dashboardData.length > 0) {
-          // Try to sum numeric values
-          const sum = dashboardData.reduce((acc, item) => {
-            const val = item[valueField];
-            return acc + (typeof val === 'number' ? val : 0);
-          }, 0);
-          metricValue = sum || dashboardData[0][valueField] || 0;
+        console.log(`[Metric ${component.id}] Calculating for "${component.title}"`, {
+          valueField,
+          dataMapping: component.dataMapping,
+          dataLength: dashboardData.length
+        });
+
+        if (dashboardData.length > 0) {
+          if (valueField) {
+            // Extract numeric values from the specified field
+            const values = dashboardData
+              .map((item, idx) => {
+                const val = item[valueField];
+                if (idx === 0) {
+                  console.log(`[Metric ${component.id}] Sample value from field "${valueField}":`, val, typeof val);
+                }
+                // Handle numeric values
+                if (typeof val === 'number') return val;
+                // Try to parse strings as numbers
+                if (typeof val === 'string') {
+                  const parsed = parseFloat(val);
+                  return isNaN(parsed) ? 0 : parsed;
+                }
+                return 0;
+              })
+              .filter(v => !isNaN(v) && v !== 0); // Filter out NaN and zeros from failed parsing
+
+            console.log(`[Metric ${component.id}] Extracted ${values.length} valid values from ${dashboardData.length} records`);
+
+            if (values.length > 0) {
+              // Check if title suggests a specific aggregation
+              const titleLower = component.title.toLowerCase();
+
+              if (titleLower.includes('count')) {
+                // For counts, use the data length
+                metricValue = dashboardData.length;
+                metricIcon = "🔢";
+                metricColor = "from-indigo-500 to-purple-500";
+              } else if (titleLower.includes('total') || titleLower.includes('sum')) {
+                metricValue = values.reduce((a, b) => a + b, 0);
+                metricIcon = "💰";
+                metricColor = "from-green-500 to-emerald-500";
+              } else if (titleLower.includes('average') || titleLower.includes('avg') || titleLower.includes('mean')) {
+                metricValue = values.reduce((a, b) => a + b, 0) / values.length;
+                metricIcon = "📈";
+                metricColor = "from-blue-500 to-cyan-500";
+              } else if (titleLower.includes('max') || titleLower.includes('highest') || titleLower.includes('peak')) {
+                metricValue = Math.max(...values);
+                metricIcon = "⬆️";
+                metricColor = "from-orange-500 to-red-500";
+              } else if (titleLower.includes('min') || titleLower.includes('lowest')) {
+                metricValue = Math.min(...values);
+                metricIcon = "⬇️";
+                metricColor = "from-purple-500 to-pink-500";
+              } else {
+                // Default: sum for counts, average for other metrics
+                metricValue = values.reduce((a, b) => a + b, 0);
+                metricIcon = "📊";
+                metricColor = "from-blue-500 to-purple-500";
+              }
+
+              console.log(`[Metric ${component.id}] Calculated value:`, metricValue);
+            } else {
+              console.warn(`[Metric ${component.id}] No valid numeric values found in field "${valueField}"`);
+              // Fallback to record count
+              metricValue = dashboardData.length;
+              metricIcon = "🔢";
+              metricColor = "from-indigo-500 to-purple-500";
+            }
+          } else {
+            console.log(`[Metric ${component.id}] No value field specified, using record count`);
+            // No value field specified - use record count
+            metricValue = dashboardData.length;
+            metricIcon = "🔢";
+            metricColor = "from-indigo-500 to-purple-500";
+          }
         }
 
         return (
@@ -146,16 +258,37 @@ export default function DashboardPage() {
             title={component.title}
             value={metricValue}
             isDarkMode={isDarkMode}
-            icon="📊"
-            color="from-blue-500 to-purple-500"
+            icon={metricIcon}
+            color={metricColor}
           />
         );
 
       case 'globe':
+        // Transform data to match GlobeDataPoint interface
+        const globeData = dashboardData.map(item => {
+          const lat = parseFloat(item[component.dataMapping.lat]);
+          const lon = parseFloat(item[component.dataMapping.lon]);
+          const value = component.dataMapping.value ? parseFloat(item[component.dataMapping.value]) : 1;
+
+          return {
+            lat: isNaN(lat) ? undefined : lat,
+            lon: isNaN(lon) ? undefined : lon,
+            value: isNaN(value) ? 1 : value,
+            label: component.dataMapping.label ? String(item[component.dataMapping.label]) : undefined
+          };
+        }).filter(d => d.lat !== undefined && d.lon !== undefined) as Array<{
+          lat: number;
+          lon: number;
+          value: number;
+          label?: string;
+        }>;
+
         return (
           <DynamicGlobeMap
             key={component.id}
-            {...commonProps}
+            data={globeData}
+            title={component.title}
+            isDarkMode={isDarkMode}
             autoRotate={true}
             rotationSpeed={0.5}
           />

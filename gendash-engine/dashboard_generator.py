@@ -62,28 +62,44 @@ class DashboardGenerator:
         """
         format_instructions = self.output_parser.get_format_instructions()
 
-        template = """Generate dashboard components from API data. Select 2-4 chart types from: line, bar, horizontalBar, pie, metric, table, globe.
+        template = """Generate dashboard components from API data.
 
 Data Summary:
 Fields: {field_summary}
 Sample: {sample_data}
+
+IMPORTANT: Nested objects are flattened with dot notation (e.g., location.latitude, location.city, user.name). Use these exact field names with dots.
+
+COMPONENT REQUIREMENTS:
+1. METRICS: Create 2-4 metric cards (type: "metric") for key statistics/KPIs
+2. CHARTS: Select 2-4 visualization charts from the available types below
+3. TABLE: Include 1 data table component
+
+
+Metric Cards (separate from charts):
+- metric: value (REQUIRED - use a numeric field name) - for displaying KPIs, totals, averages, counts, etc.
+  Example: {"id": "metric_1", "type": "metric", "title": "Total Revenue", "dataMapping": {"value": "revenue"}}
+  Example: {"id": "metric_2", "type": "metric", "title": "Average Price", "dataMapping": {"value": "price"}}
+  Example: {"id": "metric_3", "type": "metric", "title": "Total Count", "dataMapping": {"value": "id"}}
 
 Chart Types (use EXACT type names):
 - line: xKey (time/seq), yKeys[] (numeric)
 - bar: xKey (cat), yKey (num)
 - horizontalBar: yKey (cat), xKey (num) - NOTE: type must be "horizontalBar" exactly
 - pie: labelKey (cat), valueKey (num)
-- metric: value (calc from num field)
 - table: columns[] (optional)
 - globe: lat (latitude num), lon (longitude num), value (num), label (opt string). Use when data has lat/lon/coordinates.
 
 Rules:
-1. Use exact field names from data
+1. Use exact field names from data INCLUDING dot notation for nested fields (e.g., "location.latitude")
 2. Output ONLY valid JSON - no markdown, no code blocks, no explanations
 3. Each component: id, type, title, dataMapping
 4. Type must be one of: "line", "bar", "horizontalBar", "pie", "metric", "table", "globe"
 5. No layout/styling/position
-6. Prefer globe if fields contain: lat/latitude/lat, lon/longitude/lng/long, coordinates
+6. ALWAYS create EXACTLY 2-4 metric cards + 2-4 charts + 1 table = 5-9 total components
+7. Prefer globe chart if fields contain: lat/latitude/lat, lon/longitude/lng/long, coordinates
+8. Metric cards should highlight the most important statistics (totals, averages, counts, percentages)
+9. CRITICAL: Every metric card MUST have a "value" field in dataMapping pointing to a numeric field from the data
 
 Output format: {{"components": [{{"id": "...", "type": "...", "title": "...", "dataMapping": {{...}}}}]}}
 

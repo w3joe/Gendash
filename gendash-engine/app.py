@@ -127,7 +127,36 @@ def generate_dashboard():
                 api_data = api_data['features']
                 print(f"[API Response] Extracted 'features' field (GeoJSON)")
             else:
-                print(f"[API Response] No standard wrapper found, using root object")
+                # Try to find an array field in the response
+                # This handles cases like {"networks": [...], "other": "metadata"}
+                array_fields = []
+                for key, value in api_data.items():
+                    if isinstance(value, list) and len(value) > 0:
+                        array_fields.append((key, value))
+
+                if len(array_fields) == 1:
+                    # Only one array field found, use it
+                    field_name, field_value = array_fields[0]
+                    api_data = field_value
+                    print(f"[API Response] Extracted '{field_name}' field (only array field found)")
+                elif len(array_fields) > 1:
+                    # Multiple array fields - try to pick the best one
+                    # Prefer fields with plural names or longer arrays
+                    plural_fields = [(k, v) for k, v in array_fields if k.endswith('s') or k.endswith('es')]
+                    if plural_fields:
+                        # Sort by array length descending
+                        plural_fields.sort(key=lambda x: len(x[1]), reverse=True)
+                        field_name, field_value = plural_fields[0]
+                        api_data = field_value
+                        print(f"[API Response] Extracted '{field_name}' field (largest plural array)")
+                    else:
+                        # Just pick the largest array
+                        array_fields.sort(key=lambda x: len(x[1]), reverse=True)
+                        field_name, field_value = array_fields[0]
+                        api_data = field_value
+                        print(f"[API Response] Extracted '{field_name}' field (largest array)")
+                else:
+                    print(f"[API Response] No array field found, using root object")
 
         # Ensure data is a list
         if not isinstance(api_data, list):
@@ -172,6 +201,100 @@ def generate_dashboard():
         return jsonify({
             "success": False,
             "error": f"Internal server error: {str(e)}"
+        }), 500
+
+
+@app.route('/api/fetch-data', methods=['POST'])
+def fetch_data():
+    """
+    Fetch and process data from user's API endpoint.
+    Returns flattened data ready for visualization.
+
+    Request Body:
+    {
+        "apiUrl": "https://api.example.com/data"
+    }
+
+    Response:
+    {
+        "success": true,
+        "data": [ ... flattened data ... ]
+    }
+    """
+    try:
+        data = request.get_json()
+        api_url = data.get('apiUrl')
+
+        if not api_url:
+            return jsonify({
+                "success": False,
+                "error": "apiUrl is required"
+            }), 400
+
+        # Fetch data from API
+        response = requests.get(api_url, timeout=30)
+        response.raise_for_status()
+        api_data = response.json()
+
+        # Handle different API response formats (same logic as generate-dashboard)
+        if isinstance(api_data, dict):
+            if 'data' in api_data:
+                api_data = api_data['data']
+            elif 'results' in api_data:
+                api_data = api_data['results']
+            elif 'items' in api_data:
+                api_data = api_data['items']
+            elif 'features' in api_data:
+                api_data = api_data['features']
+            else:
+                # Smart array detection
+                array_fields = []
+                for key, value in api_data.items():
+                    if isinstance(value, list) and len(value) > 0:
+                        array_fields.append((key, value))
+
+                if len(array_fields) == 1:
+                    api_data = array_fields[0][1]
+                elif len(array_fields) > 1:
+                    plural_fields = [(k, v) for k, v in array_fields if k.endswith('s') or k.endswith('es')]
+                    if plural_fields:
+                        plural_fields.sort(key=lambda x: len(x[1]), reverse=True)
+                        api_data = plural_fields[0][1]
+                    else:
+                        array_fields.sort(key=lambda x: len(x[1]), reverse=True)
+                        api_data = array_fields[0][1]
+
+        # Ensure data is a list
+        if not isinstance(api_data, list):
+            api_data = [api_data] if isinstance(api_data, dict) else []
+
+        if not api_data:
+            return jsonify({
+                "success": False,
+                "error": "API returned empty or invalid data"
+            }), 400
+
+        # Flatten data using DataAnalyzer's flattening logic
+        from data_analyzer import DataAnalyzer
+        analyzer = DataAnalyzer(api_data)
+        flattened_data = analyzer.data  # Already flattened in __init__
+
+        return jsonify({
+            "success": True,
+            "data": flattened_data
+        })
+
+    except requests.RequestException as e:
+        return jsonify({
+            "success": False,
+            "error": f"Failed to fetch data from API: {str(e)}"
+        }), 400
+    except Exception as e:
+        print(f"Error fetching data: {str(e)}")
+        print(traceback.format_exc())
+        return jsonify({
+            "success": False,
+            "error": str(e)
         }), 500
 
 

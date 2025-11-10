@@ -32,25 +32,74 @@ export default function DynamicPieChart({
   const containerRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    if (!svgRef.current || !containerRef.current || !data || data.length === 0) return;
+    if (!svgRef.current || !containerRef.current || !data || data.length === 0) {
+      console.warn('[PieChart] Missing required data or refs:', {
+        hasData: !!data,
+        dataLength: data?.length,
+        hasSvgRef: !!svgRef.current,
+        hasContainerRef: !!containerRef.current
+      });
+      return;
+    }
 
-    // Aggregate data by labelKey to avoid duplicate categories
-    const aggregatedData = Array.from(
-      d3.rollup(
-        data,
-        v => d3.sum(v, d => +d[valueKey] || 0),
-        d => d[labelKey]
-      ),
-      ([label, value]) => ({ [labelKey]: label, [valueKey]: value })
-    );
+    console.log('[PieChart] Rendering with:', {
+      labelKey,
+      valueKey,
+      dataLength: data.length,
+      sampleDataPoint: data[0],
+      sampleLabelValue: data[0]?.[labelKey],
+      sampleValueValue: data[0]?.[valueKey]
+    });
 
-    // Sort by value and limit to top 10 to avoid overcrowding
-    const sortedData = aggregatedData
-      .sort((a, b) => +b[valueKey] - +a[valueKey])
-      .slice(0, 10);
+    // Check if we need to aggregate by counting unique labelKey values
+    const uniqueLabels = new Set(data.map(d => d[labelKey]));
+    const needsAggregation = uniqueLabels.size < data.length;
 
-    // Use aggregated and limited data
-    const processedData = sortedData.length > 0 ? sortedData : data.slice(0, 10);
+    console.log('[PieChart] Aggregation check:', {
+      totalRecords: data.length,
+      uniqueLabels: uniqueLabels.size,
+      needsAggregation
+    });
+
+    let processedData;
+
+    if (needsAggregation) {
+      // Aggregate data by labelKey when there are duplicates
+      const aggregatedData = Array.from(
+        d3.rollup(
+          data,
+          v => d3.sum(v, d => +d[valueKey] || 0),
+          d => d[labelKey]
+        ),
+        ([label, value]) => ({ [labelKey]: label, [valueKey]: value })
+      );
+
+      console.log('[PieChart] Aggregated data:', {
+        original: data.length,
+        aggregated: aggregatedData.length,
+        sampleAggregated: aggregatedData[0]
+      });
+
+      // Sort by value and limit to top 10 to avoid overcrowding
+      processedData = aggregatedData
+        .sort((a, b) => +b[valueKey] - +a[valueKey])
+        .slice(0, 10);
+    } else {
+      // Use data as-is, just sort and limit
+      processedData = [...data]
+        .sort((a, b) => +b[valueKey] - +a[valueKey])
+        .slice(0, 10);
+
+      console.log('[PieChart] Using data as-is (no aggregation needed):', {
+        count: processedData.length,
+        sample: processedData[0]
+      });
+    }
+
+    console.log('[PieChart] Final processed data:', {
+      count: processedData.length,
+      sample: processedData[0]
+    });
 
     // Color scheme based on dark mode
     const textColor = isDarkMode ? "#fff" : "#000";

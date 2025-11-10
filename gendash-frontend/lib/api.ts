@@ -68,37 +68,82 @@ export async function generateDashboard(
 }
 
 /**
+ * Helper function to safely get nested property value using dot notation
+ */
+function getNestedValue(obj: any, path: string): any {
+  if (!path || !obj) return obj;
+
+  const keys = path.split('.');
+  let value = obj;
+
+  for (const key of keys) {
+    if (value === null || value === undefined) return undefined;
+    value = value[key];
+  }
+
+  return value;
+}
+
+/**
+ * Flatten a nested object structure for visualization
+ */
+function flattenObject(obj: any, parentKey: string = '', separator: string = '.'): any {
+  if (typeof obj !== 'object' || obj === null) {
+    return obj;
+  }
+
+  const flattened: any = {};
+
+  for (const key in obj) {
+    if (!obj.hasOwnProperty(key)) continue;
+
+    const newKey = parentKey ? `${parentKey}${separator}${key}` : key;
+    const value = obj[key];
+
+    if (value !== null && typeof value === 'object' && !Array.isArray(value)) {
+      // Recursively flatten nested objects
+      Object.assign(flattened, flattenObject(value, newKey, separator));
+    } else if (Array.isArray(value) && value.length > 0 && typeof value[0] === 'object') {
+      // Array of objects - convert to JSON string
+      flattened[newKey] = JSON.stringify(value);
+    } else if (Array.isArray(value)) {
+      // Array of primitives - convert to string
+      flattened[newKey] = value.join(', ');
+    } else {
+      // Primitive value
+      flattened[newKey] = value;
+    }
+  }
+
+  return flattened;
+}
+
+/**
  * Fetch data from user's API endpoint
+ * Returns data that has been fetched, parsed, and flattened by the backend
  */
 export async function fetchApiData(apiUrl: string): Promise<any[]> {
   try {
-    const response = await fetch(apiUrl);
+    // Use backend proxy to fetch and process data
+    const response = await fetch(`${API_BASE_URL}/api/fetch-data`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ apiUrl }),
+    });
 
     if (!response.ok) {
       throw new Error(`Failed to fetch data: ${response.statusText}`);
     }
 
-    let data = await response.json();
+    const result = await response.json();
 
-    // Handle different API response formats
-    if (typeof data === 'object' && !Array.isArray(data)) {
-      if ('data' in data) {
-        data = data.data;
-      } else if ('results' in data) {
-        data = data.results;
-      } else if ('items' in data) {
-        data = data.items;
-      } else if ('features' in data) {
-        data = data.features;
-      }
+    if (!result.success) {
+      throw new Error(result.error || 'Failed to fetch data');
     }
 
-    // Ensure data is an array
-    if (!Array.isArray(data)) {
-      data = [data];
-    }
-
-    return data;
+    return result.data || [];
   } catch (error) {
     if (error instanceof Error) {
       throw new Error(`Failed to fetch API data: ${error.message}`);
@@ -106,6 +151,9 @@ export async function fetchApiData(apiUrl: string): Promise<any[]> {
     throw new Error('Unknown error occurred');
   }
 }
+
+// Export helper for components that need to access nested values
+export { getNestedValue };
 
 /**
  * Health check for backend service

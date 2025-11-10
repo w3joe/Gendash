@@ -25,33 +25,60 @@ class DataAnalyzer:
         Args:
             data: List of dictionaries representing API response data
         """
-        # Keep raw data for sample output, but sanitize values for DataFrame
-        # operations to avoid unhashable types (e.g., dicts/lists) causing
-        # pandas functions like `nunique()` to raise "unhashable type: 'dict'".
+        # Keep raw data for sample output
         self.raw_data = data or []
 
-        sanitized = []
+        # Flatten nested structures for analysis and visualization
+        flattened = []
         for row in self.raw_data:
-            new_row = {}
-            # If row isn't a mapping, preserve it as-is
             if not isinstance(row, dict):
-                sanitized.append(row)
+                flattened.append(row)
                 continue
-            for k, v in row.items():
-                # Convert nested dicts/lists to stable JSON strings so they are
-                # hashable and can be used in pandas uniqueness checks.
-                if isinstance(v, (dict, list)):
-                    try:
-                        new_row[k] = json.dumps(v, sort_keys=True)
-                    except Exception:
-                        new_row[k] = str(v)
-                else:
-                    new_row[k] = v
-            sanitized.append(new_row)
 
-        # Use sanitized data for DataFrame operations
-        self.data = sanitized
+            # Flatten the nested structure
+            flat_row = self._flatten_dict(row)
+            flattened.append(flat_row)
+
+        # Use flattened data for DataFrame operations
+        self.data = flattened
         self.df = pd.DataFrame(self.data) if self.data else pd.DataFrame()
+
+    def _flatten_dict(self, d: Dict[str, Any], parent_key: str = '', sep: str = '.') -> Dict[str, Any]:
+        """
+        Flatten a nested dictionary structure.
+
+        Args:
+            d: Dictionary to flatten
+            parent_key: Prefix for nested keys
+            sep: Separator between nested levels
+
+        Returns:
+            Flattened dictionary with dot-notation keys
+        """
+        items = []
+        for k, v in d.items():
+            new_key = f"{parent_key}{sep}{k}" if parent_key else k
+
+            if isinstance(v, dict):
+                # Recursively flatten nested dicts
+                items.extend(self._flatten_dict(v, new_key, sep=sep).items())
+            elif isinstance(v, list):
+                # Handle arrays differently based on content
+                if len(v) > 0 and isinstance(v[0], dict):
+                    # Array of objects - convert to JSON string for now
+                    # (could be extended to create separate rows in future)
+                    try:
+                        items.append((new_key, json.dumps(v, sort_keys=True)))
+                    except Exception:
+                        items.append((new_key, str(v)))
+                else:
+                    # Array of primitives - convert to string
+                    items.append((new_key, str(v)))
+            else:
+                # Primitive value - keep as-is
+                items.append((new_key, v))
+
+        return dict(items)
 
     def analyze(self) -> DataAnalysisResult:
         """

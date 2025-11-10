@@ -208,39 +208,79 @@ export default function DynamicDataTable({
             Showing {((currentPage - 1) * pageSize) + 1} to {Math.min(currentPage * pageSize, sortedData.length)} of {sortedData.length} entries
             {isTruncated && ` (limited from ${totalDataCount})`}
           </div>
-          <div className="flex gap-2">
+          <div className="flex gap-1 sm:gap-2 items-center flex-wrap justify-center">
             <button
               onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
               disabled={currentPage === 1}
-              className={`px-3 py-1 rounded-lg transition-colors ${
+              className={`px-2 sm:px-3 py-1 rounded-lg text-xs sm:text-sm transition-colors ${
                 currentPage === 1
                   ? 'opacity-50 cursor-not-allowed'
                   : 'hover:bg-purple-500/20'
               } ${isDarkMode ? 'bg-zinc-800' : 'bg-gray-200'}`}
             >
-              Previous
+              Prev
             </button>
-            <div className="flex gap-1">
-              {Array.from({ length: totalPages }, (_, i) => i + 1).map(page => (
-                <button
-                  key={page}
-                  onClick={() => setCurrentPage(page)}
-                  className={`px-3 py-1 rounded-lg transition-colors ${
-                    currentPage === page
-                      ? 'bg-purple-500 text-white'
-                      : isDarkMode
-                      ? 'bg-zinc-800 hover:bg-zinc-700'
-                      : 'bg-gray-200 hover:bg-gray-300'
-                  }`}
-                >
-                  {page}
-                </button>
-              ))}
+
+            {/* Page numbers with ellipsis - show max 5 pages */}
+            <div className="flex gap-1 items-center">
+              {/* First page */}
+              {currentPage > 3 && (
+                <>
+                  <button
+                    onClick={() => setCurrentPage(1)}
+                    className={`px-2 sm:px-3 py-1 rounded-lg text-xs sm:text-sm transition-colors ${
+                      isDarkMode ? 'bg-zinc-800 hover:bg-zinc-700' : 'bg-gray-200 hover:bg-gray-300'
+                    }`}
+                  >
+                    1
+                  </button>
+                  {currentPage > 4 && (
+                    <span className={`px-1 sm:px-2 py-1 text-xs sm:text-sm ${isDarkMode ? 'text-zinc-500' : 'text-gray-500'}`}>...</span>
+                  )}
+                </>
+              )}
+
+              {/* Pages around current (max 5 visible) */}
+              {Array.from({ length: totalPages }, (_, i) => i + 1)
+                .filter(page => page >= currentPage - 2 && page <= currentPage + 2)
+                .map(page => (
+                  <button
+                    key={page}
+                    onClick={() => setCurrentPage(page)}
+                    className={`px-2 sm:px-3 py-1 rounded-lg text-xs sm:text-sm transition-colors ${
+                      currentPage === page
+                        ? 'bg-purple-500 text-white'
+                        : isDarkMode
+                        ? 'bg-zinc-800 hover:bg-zinc-700'
+                        : 'bg-gray-200 hover:bg-gray-300'
+                    }`}
+                  >
+                    {page}
+                  </button>
+                ))}
+
+              {/* Last page */}
+              {currentPage < totalPages - 2 && (
+                <>
+                  {currentPage < totalPages - 3 && (
+                    <span className={`px-1 sm:px-2 py-1 text-xs sm:text-sm ${isDarkMode ? 'text-zinc-500' : 'text-gray-500'}`}>...</span>
+                  )}
+                  <button
+                    onClick={() => setCurrentPage(totalPages)}
+                    className={`px-2 sm:px-3 py-1 rounded-lg text-xs sm:text-sm transition-colors ${
+                      isDarkMode ? 'bg-zinc-800 hover:bg-zinc-700' : 'bg-gray-200 hover:bg-gray-300'
+                    }`}
+                  >
+                    {totalPages}
+                  </button>
+                </>
+              )}
             </div>
+
             <button
               onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
               disabled={currentPage === totalPages}
-              className={`px-3 py-1 rounded-lg transition-colors ${
+              className={`px-2 sm:px-3 py-1 rounded-lg text-xs sm:text-sm transition-colors ${
                 currentPage === totalPages
                   ? 'opacity-50 cursor-not-allowed'
                   : 'hover:bg-purple-500/20'

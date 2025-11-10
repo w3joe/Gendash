@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import * as THREE from "three";
 import * as d3 from "d3";
 
@@ -39,6 +39,8 @@ export default function DynamicGlobeMap({
   const cameraRef = useRef<THREE.PerspectiveCamera | null>(null);
   const rendererRef = useRef<THREE.WebGLRenderer | null>(null);
   const globeRef = useRef<THREE.Group | null>(null);
+  const [selectedPoint, setSelectedPoint] = useState<GlobeDataPoint | null>(null);
+  const [tooltipPosition, setTooltipPosition] = useState<{ x: number; y: number } | null>(null);
 
   useEffect(() => {
     if (!containerRef.current) return;
@@ -233,6 +235,11 @@ export default function DynamicGlobeMap({
         });
         const marker = new THREE.Mesh(markerGeometry, markerMaterial);
         marker.position.set(x, y, z);
+
+        // Store data point reference for click interaction
+        marker.userData.dataPoint = point;
+        marker.userData.isMarker = true;
+
         globeGroup.add(marker);
 
         // Add pulsing animation
@@ -282,8 +289,12 @@ export default function DynamicGlobeMap({
       }
     };
 
+    // Set initial cursor
+    container.style.cursor = 'grab';
+
     const onMouseDown = (e: MouseEvent) => {
       isDragging = true;
+      container.style.cursor = 'grabbing';
       previousMousePosition = {
         x: e.clientX,
         y: e.clientY
@@ -291,6 +302,32 @@ export default function DynamicGlobeMap({
     };
 
     const onMouseMove = (e: MouseEvent) => {
+      // Check for marker hover (only if not dragging)
+      if (!isDragging) {
+        const rect = container.getBoundingClientRect();
+        const mouseX = ((e.clientX - rect.left) / rect.width) * 2 - 1;
+        const mouseY = -((e.clientY - rect.top) / rect.height) * 2 + 1;
+
+        const raycaster = new THREE.Raycaster();
+        raycaster.setFromCamera(new THREE.Vector2(mouseX, mouseY), camera);
+
+        // Check for marker intersections
+        const intersects = raycaster.intersectObjects(globeGroup.children, false);
+        let foundMarker = false;
+
+        for (const intersect of intersects) {
+          if (intersect.object.userData.isMarker) {
+            container.style.cursor = 'pointer';
+            foundMarker = true;
+            break;
+          }
+        }
+
+        if (!foundMarker) {
+          container.style.cursor = isDragging ? 'grabbing' : 'grab';
+        }
+      }
+
       if (!isDragging || !globeGroup) return;
 
       const deltaMove = {
@@ -309,6 +346,7 @@ export default function DynamicGlobeMap({
 
     const onMouseUp = () => {
       isDragging = false;
+      container.style.cursor = 'grab';
     };
 
     // Double-click to zoom
@@ -381,6 +419,35 @@ export default function DynamicGlobeMap({
       }
     };
 
+    // Handle single click - check for marker click
+    const onSingleClick = (e: MouseEvent) => {
+      const rect = container.getBoundingClientRect();
+      const mouseX = ((e.clientX - rect.left) / rect.width) * 2 - 1;
+      const mouseY = -((e.clientY - rect.top) / rect.height) * 2 + 1;
+
+      const raycaster = new THREE.Raycaster();
+      raycaster.setFromCamera(new THREE.Vector2(mouseX, mouseY), camera);
+
+      // Check for marker intersections
+      const intersects = raycaster.intersectObjects(globeGroup.children, false);
+
+      for (const intersect of intersects) {
+        if (intersect.object.userData.isMarker && intersect.object.userData.dataPoint) {
+          // Found a marker - show tooltip
+          setSelectedPoint(intersect.object.userData.dataPoint);
+          setTooltipPosition({
+            x: e.clientX - rect.left,
+            y: e.clientY - rect.top
+          });
+          return;
+        }
+      }
+
+      // No marker clicked - close tooltip
+      setSelectedPoint(null);
+      setTooltipPosition(null);
+    };
+
     // Handle single vs double click
     const onClick = (e: MouseEvent) => {
       if (clickTimeout) {
@@ -389,6 +456,7 @@ export default function DynamicGlobeMap({
         onDoubleClick(e);
       } else {
         clickTimeout = setTimeout(() => {
+          onSingleClick(e);
           clickTimeout = null;
         }, 300);
       }
@@ -450,17 +518,75 @@ export default function DynamicGlobeMap({
   return (
     <div className="w-full">
       {title && <h3 className={`text-base sm:text-lg font-semibold mb-4 ${isDarkMode ? 'text-zinc-100' : 'text-gray-900'}`}>{title}</h3>}
-      <div
-        ref={containerRef}
-        className="relative w-full flex items-center justify-center"
-        style={{
-          height: typeof window !== 'undefined' && window.innerWidth < 640
-            ? Math.min(height, 300)
-            : height
-        }}
-      />
+      <div className="relative w-full">
+        <div
+          ref={containerRef}
+          className="relative w-full flex items-center justify-center"
+          style={{
+            height: typeof window !== 'undefined' && window.innerWidth < 640
+              ? Math.min(height, 300)
+              : height
+          }}
+        />
+
+        {/* Tooltip/Info Panel */}
+        {selectedPoint && tooltipPosition && (
+          <div
+            className={`absolute z-50 pointer-events-none transition-opacity duration-200 ${
+              isDarkMode
+                ? 'bg-zinc-800/95 border-zinc-700 text-zinc-100'
+                : 'bg-white/95 border-gray-300 text-gray-900'
+            } border rounded-lg shadow-xl backdrop-blur-sm`}
+            style={{
+              left: tooltipPosition.x + 10,
+              top: tooltipPosition.y + 10,
+              maxWidth: '300px'
+            }}
+          >
+            <div className="p-3 space-y-2">
+              {/* Label */}
+              {selectedPoint.label && (
+                <div className={`text-sm font-semibold pb-2 border-b ${
+                  isDarkMode ? 'border-zinc-700' : 'border-gray-200'
+                }`}>
+                  {selectedPoint.label}
+                </div>
+              )}
+
+              {/* Coordinates */}
+              <div className="space-y-1 text-xs">
+                <div className="flex justify-between gap-4">
+                  <span className={isDarkMode ? 'text-zinc-400' : 'text-gray-600'}>
+                    Latitude:
+                  </span>
+                  <span className="font-mono">
+                    {selectedPoint.lat.toFixed(4)}°
+                  </span>
+                </div>
+                <div className="flex justify-between gap-4">
+                  <span className={isDarkMode ? 'text-zinc-400' : 'text-gray-600'}>
+                    Longitude:
+                  </span>
+                  <span className="font-mono">
+                    {selectedPoint.lon.toFixed(4)}°
+                  </span>
+                </div>
+                <div className="flex justify-between gap-4">
+                  <span className={isDarkMode ? 'text-zinc-400' : 'text-gray-600'}>
+                    Value:
+                  </span>
+                  <span className="font-semibold text-blue-500">
+                    {selectedPoint.value.toLocaleString()}
+                  </span>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+      </div>
+
       <div className={`mt-4 text-center text-xs sm:text-sm ${isDarkMode ? 'text-zinc-400' : 'text-gray-600'}`}>
-        <span className="hidden sm:inline">Drag to rotate • Double-click to zoom • </span>
+        <span className="hidden sm:inline">Click marker for details • Drag to rotate • Double-click to zoom • </span>
         <span>
           {data.length > maxPoints
             ? `Displaying top ${maxPoints} of ${data.length} data points`

@@ -1,0 +1,32 @@
+version: '3.8'
+
+services:
+  gendash:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: gendash-app
+    ports:
+      - "3000:3000"  # Frontend
+      - "5000:5000"  # Backend API
+    environment:
+      - GOOGLE_API_KEY=${GOOGLE_API_KEY}
+      - NODE_ENV=production
+      - PYTHONUNBUFFERED=1
+    volumes:
+      # Optional: Mount for development hot-reload
+      # - ./gendash-engine:/app/backend
+      # - ./gendash-frontend:/app/frontend
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000/"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+    networks:
+      - gendash-network
+
+networks:
+  gendash-network:
+    driver: bridge

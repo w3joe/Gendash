@@ -30,25 +30,74 @@ export default function DynamicHorizontalBarChart({
   const containerRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    if (!svgRef.current || !containerRef.current || !data || data.length === 0) return;
+    if (!svgRef.current || !containerRef.current || !data || data.length === 0) {
+      console.warn('[HorizontalBarChart] Missing required data or refs:', {
+        hasData: !!data,
+        dataLength: data?.length,
+        hasSvgRef: !!svgRef.current,
+        hasContainerRef: !!containerRef.current
+      });
+      return;
+    }
 
-    // Aggregate data by yKey to avoid duplicate categories
-    const aggregatedData = Array.from(
-      d3.rollup(
-        data,
-        v => d3.sum(v, d => +d[xKey] || 0),
-        d => d[yKey]
-      ),
-      ([category, value]) => ({ [yKey]: category, [xKey]: value })
-    );
+    console.log('[HorizontalBarChart] Rendering with:', {
+      yKey,
+      xKey,
+      dataLength: data.length,
+      sampleDataPoint: data[0],
+      sampleYValue: data[0]?.[yKey],
+      sampleXValue: data[0]?.[xKey]
+    });
 
-    // Sort by value and limit to top 15 categories
-    const sortedData = aggregatedData
-      .sort((a, b) => +b[xKey] - +a[xKey])
-      .slice(0, 15);
+    // Check if we need to aggregate by counting unique yKey values
+    const uniqueCategories = new Set(data.map(d => d[yKey]));
+    const needsAggregation = uniqueCategories.size < data.length;
 
-    // Use aggregated and limited data
-    const processedData = sortedData.length > 0 ? sortedData : data.slice(0, 15);
+    console.log('[HorizontalBarChart] Aggregation check:', {
+      totalRecords: data.length,
+      uniqueCategories: uniqueCategories.size,
+      needsAggregation
+    });
+
+    let processedData;
+
+    if (needsAggregation) {
+      // Aggregate data by yKey when there are duplicates
+      const aggregatedData = Array.from(
+        d3.rollup(
+          data,
+          v => d3.sum(v, d => +d[xKey] || 0),
+          d => d[yKey]
+        ),
+        ([category, value]) => ({ [yKey]: category, [xKey]: value })
+      );
+
+      console.log('[HorizontalBarChart] Aggregated data:', {
+        original: data.length,
+        aggregated: aggregatedData.length,
+        sampleAggregated: aggregatedData[0]
+      });
+
+      // Sort by value and limit to top 15 categories
+      processedData = aggregatedData
+        .sort((a, b) => +b[xKey] - +a[xKey])
+        .slice(0, 15);
+    } else {
+      // Use data as-is, just sort and limit
+      processedData = [...data]
+        .sort((a, b) => +b[xKey] - +a[xKey])
+        .slice(0, 15);
+
+      console.log('[HorizontalBarChart] Using data as-is (no aggregation needed):', {
+        count: processedData.length,
+        sample: processedData[0]
+      });
+    }
+
+    console.log('[HorizontalBarChart] Final processed data:', {
+      count: processedData.length,
+      sample: processedData[0]
+    });
 
     // Color scheme based on dark mode
     const textColor = isDarkMode ? "#a1a1aa" : "#6b7280";
